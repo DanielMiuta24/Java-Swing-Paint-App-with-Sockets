@@ -2,12 +2,12 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
+import java.io.*;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Base64;
+import java.util.LinkedList;
+import java.util.Queue;
 import javax.imageio.ImageIO;
 import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ServerHandshake;
@@ -24,36 +24,33 @@ public class PaintForm extends JFrame {
     // Drawing state variables
     private boolean paint = false;
     private Point px, py;
-    private int index, x, y, sX, sY, cX, cY;
+    private int index; // Keeps track of selected tool
+    private int x, y, sX, sY, cX, cY;
 
     // Tools for drawing and erasing
-    private final BasicStroke p = new BasicStroke(1);
-    private final BasicStroke erase = new BasicStroke(20);
+    private final BasicStroke pencilStroke = new BasicStroke(1);
+    private final BasicStroke eraserStroke = new BasicStroke(20);
 
     // Color management
-    private final JColorChooser colorChooser = new JColorChooser();
     private Color newColor = Color.BLACK;
 
-    private JLabel pic;
-    private JLabel colorPreview;
+    private JLabel pic; // Canvas label
+    private JLabel colorPreview; // Label displaying the selected color
 
-    // Constructor
     public PaintForm() {
         // Initialize components
         initComponents();
 
         // Application metadata
-        String appVersion = "1.0"; // Replace with actual version
-        String author = "Daniel"; // Replace with actual author name
+        String appVersion = "1.0";
+        String author = "Daniel";
         int currentYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR);
 
         // Set the frame title
         this.setTitle(String.format("Paint - v%s | © %d %s. All rights reserved.", appVersion, currentYear, author));
 
-        // Set form size
+        // Set window size and center it
         this.setSize(900, 700);
-
-        // Center the form on the screen
         this.setLocationRelativeTo(null);
 
         // Initialize drawing surface and WebSocket
@@ -61,7 +58,6 @@ public class PaintForm extends JFrame {
         initializeWebSocket();
     }
 
-    // Initialize UI components
     private void initComponents() {
         pic = new JLabel();
         colorPreview = new JLabel();
@@ -69,47 +65,51 @@ public class PaintForm extends JFrame {
         colorPreview.setBackground(newColor);
 
         JPanel toolPanel = new JPanel();
-        JButton btnPencil = new JButton("Pencil");
-        JButton btnEraser = new JButton("Eraser");
-        JButton btnRectangle = new JButton("Rectangle");
-        JButton btnEllipse = new JButton("Ellipse");
-        JButton btnLine = new JButton("Line");
-        JButton btnColor = new JButton("Color");
-        JButton btnClear = new JButton("Clear");
-        JButton btnSave = new JButton("Save");
-        JButton btnOpen = new JButton("Open");
-        JButton btnNewWindow = new JButton("New Window");
+        toolPanel.setLayout(new GridLayout(8, 1, 5, 5)); // Use a GridLayout for the tool buttons
 
+        // Create buttons with icons
+        JButton btnPencil = createIconButton("Pencil", "resources/icons/pencil.png");
+        JButton btnEraser = createIconButton("Eraser", "resources/icons/eraser.png");
+        JButton btnRectangle = createIconButton("Rectangle", "resources/icons/rectangle.png");
+        JButton btnEllipse = createIconButton("Ellipse", "resources/icons/ellipse.png");
+        JButton btnLine = createIconButton("Line", "resources/icons/line.png");
+        JButton btnColor = createIconButton("Color", "resources/icons/color.png");
+        JButton btnFill = createIconButton("Fill", "resources/icons/fill.png");
+        JButton btnClear = createIconButton("Clear", "resources/icons/clear.png");
+
+        // Add buttons to the tool panel
         toolPanel.add(btnPencil);
         toolPanel.add(btnEraser);
         toolPanel.add(btnRectangle);
         toolPanel.add(btnEllipse);
         toolPanel.add(btnLine);
         toolPanel.add(btnColor);
+        toolPanel.add(btnFill);
         toolPanel.add(btnClear);
-        toolPanel.add(btnSave);
-        toolPanel.add(btnOpen);
-        toolPanel.add(btnNewWindow);
 
-        // Add listeners
-        btnPencil.addActionListener(e -> index = 1);
-        btnEraser.addActionListener(e -> index = 2);
-        btnRectangle.addActionListener(e -> index = 4);
-        btnEllipse.addActionListener(e -> index = 3);
-        btnLine.addActionListener(e -> index = 5);
-        btnColor.addActionListener(e -> chooseColor());
-        btnClear.addActionListener(e -> clearCanvas());
-        btnSave.addActionListener(e -> saveCanvas());
-        btnOpen.addActionListener(e -> openCanvas());
-        btnNewWindow.addActionListener(e -> openNewWindow());
+        // Add action listeners for tools
+        btnPencil.addActionListener(e -> index = 1); // Pencil Tool
+        btnEraser.addActionListener(e -> index = 2); // Eraser Tool
+        btnRectangle.addActionListener(e -> index = 4); // Rectangle Tool
+        btnEllipse.addActionListener(e -> index = 3); // Ellipse Tool
+        btnLine.addActionListener(e -> index = 5); // Line Tool
+        btnColor.addActionListener(e -> chooseColor()); // Select color
+        btnFill.addActionListener(e -> index = 6); // Fill Tool
+        btnClear.addActionListener(e -> clearCanvas()); // Clear canvas
 
+        // Add Mouse Listeners for canvas
         pic.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
                 paint = true;
+                px = e.getPoint();
                 py = e.getPoint();
                 cX = e.getX();
                 cY = e.getY();
+
+                if (index == 6) { // Fill tool
+                    fillArea(px.x, px.y, newColor); // Perform flood fill
+                }
             }
 
             @Override
@@ -118,17 +118,16 @@ public class PaintForm extends JFrame {
                 sX = x - cX;
                 sY = y - cY;
 
-                if (index == 3) { // Ellipse
+                // Draw shapes when the mouse is released
+                if (index == 3) { // Ellipse Tool
                     g.drawOval(Math.min(cX, x), Math.min(cY, y), Math.abs(sX), Math.abs(sY));
-                    broadcastCanvasState();
-                } else if (index == 4) { // Rectangle
+                } else if (index == 4) { // Rectangle Tool
                     g.drawRect(Math.min(cX, x), Math.min(cY, y), Math.abs(sX), Math.abs(sY));
-                    broadcastCanvasState();
-                } else if (index == 5) { // Line
+                } else if (index == 5) { // Line Tool
                     g.drawLine(cX, cY, x, y);
-                    broadcastCanvasState();
                 }
                 pic.repaint();
+                broadcastCanvasState();
             }
         });
 
@@ -137,97 +136,105 @@ public class PaintForm extends JFrame {
             public void mouseDragged(MouseEvent e) {
                 if (!paint) return;
 
-                if (index == 1) { // Pencil
-                    g.drawLine(px.x, px.y, e.getX(), e.getY());
+                x = e.getX();
+                y = e.getY();
+
+                if (index == 1) { // Pencil Tool
+                    g.setStroke(pencilStroke);
+                    g.drawLine(px.x, px.y, x, y);
                     px = e.getPoint();
-                    broadcastCanvasState();
-                } else if (index == 2) { // Eraser
-                    g.setStroke(erase);
+                } else if (index == 2) { // Eraser Tool
+                    g.setStroke(eraserStroke);
                     g.setColor(Color.WHITE);
-                    g.drawLine(px.x, px.y, e.getX(), e.getY());
+                    g.drawLine(px.x, px.y, x, y);
                     px = e.getPoint();
-                    broadcastCanvasState();
-                    g.setStroke(p);
-                    g.setColor(newColor); // Reset color
+                    g.setColor(newColor); // Reset to current color
+                    g.setStroke(pencilStroke); // Reset stroke size
                 }
                 pic.repaint();
+                broadcastCanvasState();
             }
         });
 
+        // File Menu (including New Window)
+        JMenuBar menuBar = new JMenuBar();
+        JMenu fileMenu = new JMenu("File");
+        JMenuItem openItem = new JMenuItem("Open");
+        JMenuItem saveItem = new JMenuItem("Save");
+        JMenuItem newWindowItem = new JMenuItem("New Window");
+
+        openItem.addActionListener(e -> openCanvas());
+        saveItem.addActionListener(e -> saveCanvas());
+        newWindowItem.addActionListener(e -> new PaintForm().setVisible(true));
+
+        fileMenu.add(openItem);
+        fileMenu.add(saveItem);
+        fileMenu.add(newWindowItem);
+        menuBar.add(fileMenu);
+
+        // Add components to the JFrame
+        this.setJMenuBar(menuBar);
         this.setLayout(new BorderLayout());
-        this.add(toolPanel, BorderLayout.NORTH);
+        this.add(toolPanel, BorderLayout.WEST);
+        this.add(colorPreview, BorderLayout.NORTH);
         this.add(pic, BorderLayout.CENTER);
     }
 
-    // Initialize drawing surface
+    // Method to create a button with an icon
+    private JButton createIconButton(String tooltip, String iconPath) {
+        JButton button = new JButton();
+        button.setToolTipText(tooltip);
+        try {
+            ImageIcon icon = new ImageIcon(iconPath);
+            Image scaledImage = icon.getImage().getScaledInstance(24, 24, Image.SCALE_SMOOTH);
+            button.setIcon(new ImageIcon(scaledImage));
+        } catch (Exception e) {
+            button.setText(tooltip); // Fallback if the icon file cannot be loaded
+        }
+        return button;
+    }
+
+    // Initialize the drawing surface
     private void initializeDrawingSurface() {
         b_map = new BufferedImage(900, 700, BufferedImage.TYPE_INT_ARGB);
         g = b_map.createGraphics();
         g.setColor(Color.WHITE);
-        g.fillRect(0, 0, b_map.getWidth(), b_map.getHeight());
+        g.fillRect(0, 0, b_map.getWidth(), b_map.getHeight()); // Fill white background
         g.setColor(newColor);
         pic.setIcon(new ImageIcon(b_map));
     }
 
-    // WebSocket setup
-    private void initializeWebSocket() {
-        try {
-            webSocket = new WebSocketClient(new URI("ws://localhost:8081/paint")) {
-                @Override
-                public void onOpen(ServerHandshake handshakedata) {
-                    System.out.println("WebSocket connection established.");
-                }
+    private void fillArea(int x, int y, Color replacementColor) {
+        int targetColor = b_map.getRGB(x, y);
+        if (targetColor == replacementColor.getRGB()) return;
 
-                @Override
-                public void onMessage(String message) {
-                    if (message.startsWith("update_img:")) {
-                        String base64Image = message.substring("update_img:".length());
-                        try {
-                            byte[] bytes = Base64.getDecoder().decode(base64Image);
-                            BufferedImage img = ImageIO.read(new ByteArrayInputStream(bytes));
-                            g.drawImage(img, 0, 0, null);
-                            pic.repaint();
-                        } catch (IOException ex) {
-                            ex.printStackTrace();
-                        }
-                    }
-                }
+        Queue<Point> pointsQueue = new LinkedList<>();
+        pointsQueue.add(new Point(x, y));
 
-                @Override
-                public void onClose(int code, String reason, boolean remote) {
-                    System.out.println("WebSocket closed: " + reason);
-                }
+        while (!pointsQueue.isEmpty()) {
+            Point point = pointsQueue.poll();
+            int currentX = point.x;
+            int currentY = point.y;
 
-                @Override
-                public void onError(Exception ex) {
-                    System.out.println("WebSocket error: " + ex.getMessage());
-                }
-            };
-            webSocket.connect();
-        } catch (URISyntaxException e) {
-            System.out.println("WebSocket setup failed: " + e.getMessage());
+            if (currentX < 0 || currentY < 0 || currentX >= b_map.getWidth() || currentY >= b_map.getHeight())
+                continue;
+            if (b_map.getRGB(currentX, currentY) != targetColor) continue;
+
+            b_map.setRGB(currentX, currentY, replacementColor.getRGB());
+            pointsQueue.add(new Point(currentX + 1, currentY));
+            pointsQueue.add(new Point(currentX - 1, currentY));
+            pointsQueue.add(new Point(currentX, currentY + 1));
+            pointsQueue.add(new Point(currentX, currentY - 1));
         }
-    }
 
-    // Update the canvas state
-    private void broadcastCanvasState() {
-        try {
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            ImageIO.write(b_map, "png", baos);
-            String base64Image = Base64.getEncoder().encodeToString(baos.toByteArray());
-            if (webSocket != null && webSocket.isOpen()) {
-                webSocket.send("update_img:" + base64Image);
-            }
-        } catch (IOException ex) {
-            System.out.println("Error broadcasting state: " + ex.getMessage());
-        }
+        pic.repaint();
+        broadcastCanvasState();
     }
 
     private void chooseColor() {
-        Color selected = JColorChooser.showDialog(this, "Choose Color", newColor);
-        if (selected != null) {
-            newColor = selected;
-            g.setColor(newColor);
+        Color selectedColor = JColorChooser.showDialog(this, "Choose Color", newColor);
+        if (selectedColor != null) {
+            newColor = selectedColor;
             colorPreview.setBackground(newColor);
         }
     }
@@ -266,8 +273,56 @@ public class PaintForm extends JFrame {
         }
     }
 
-    private void openNewWindow() {
-        new PaintForm().setVisible(true);
+    private void initializeWebSocket() {
+        try {
+            webSocket = new WebSocketClient(new URI("ws://localhost:8081/paint")) {
+                @Override
+                public void onOpen(ServerHandshake handshake) {
+                    System.out.println("WebSocket connected!");
+                }
+
+                @Override
+                public void onMessage(String message) {
+                    if (message.startsWith("update_img:")) {
+                        String base64Image = message.substring("update_img:".length());
+                        try {
+                            byte[] bytes = Base64.getDecoder().decode(base64Image);
+                            BufferedImage img = ImageIO.read(new ByteArrayInputStream(bytes));
+                            g.drawImage(img, 0, 0, null);
+                            pic.repaint();
+                        } catch (IOException ex) {
+                            ex.printStackTrace();
+                        }
+                    }
+                }
+
+                @Override
+                public void onClose(int code, String reason, boolean remote) {
+                    System.out.println("WebSocket closed: " + reason);
+                }
+
+                @Override
+                public void onError(Exception ex) {
+                    System.err.println("WebSocket error: " + ex.getMessage());
+                }
+            };
+            webSocket.connect();
+        } catch (URISyntaxException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void broadcastCanvasState() {
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ImageIO.write(b_map, "png", baos);
+            String encodedImage = Base64.getEncoder().encodeToString(baos.toByteArray());
+            if (webSocket != null && webSocket.isOpen()) {
+                webSocket.send("update_img:" + encodedImage);
+            }
+        } catch (IOException ex) {
+            System.err.println("Error broadcasting canvas state: " + ex.getMessage());
+        }
     }
 
     public static void main(String[] args) {
