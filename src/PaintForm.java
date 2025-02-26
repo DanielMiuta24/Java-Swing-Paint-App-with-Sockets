@@ -6,54 +6,52 @@ import java.io.*;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Base64;
-import java.util.LinkedList;
-import java.util.Queue;
 import javax.imageio.ImageIO;
 import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ServerHandshake;
 
 public class PaintForm extends JFrame {
+    private final DrawingTools drawingTools = new DrawingTools(); // For handling drawing tools
+    private final FileDialogHandler fileHandler = new FileDialogHandler(); // For file operations
 
-    // WebSocket for server communication
+    // WebSocket for communication
     private WebSocketClient webSocket;
 
-    // BufferedImage and Graphics for drawing on the canvas
+    // BufferedImage and Graphics for canvas
     private BufferedImage b_map;
     private Graphics2D g;
 
-    // Drawing state variables
+    // Drawing-related variables
     private boolean paint = false;
-    private Point px, py;
-    private int index; // Keeps track of selected tool
-    private int x, y, sX, sY, cX, cY;
+    private int index; // Tracks which drawing tool is selected
+    private int x, y, cX, cY, sX, sY;
+    private Point px, py; // Previous and current points for pencil/eraser
 
-    // Tools for drawing and erasing
-    private final BasicStroke pencilStroke = new BasicStroke(1);
-    private final BasicStroke eraserStroke = new BasicStroke(20);
+    // Pencil and eraser strokes
+    private final BasicStroke pencilStroke = new BasicStroke(1); // Thin stroke for pencil
+    private final BasicStroke eraserStroke = new BasicStroke(20); // Thick stroke for eraser
 
-    // Color management
+    // Color state
     private Color newColor = Color.BLACK;
 
-    private JLabel pic; // Canvas label
-    private JLabel colorPreview; // Label displaying the selected color
+    private JLabel pic; // The canvas
+    private JLabel colorPreview; // Current color indicator
 
     public PaintForm() {
-        // Initialize components
+        // Initialize GUI components
         initComponents();
 
-        // Application metadata
+        // Set metadata for the application
         String appVersion = "1.0";
         String author = "Daniel";
         int currentYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR);
 
-        // Set the frame title
+        // Set JFrame properties
         this.setTitle(String.format("Paint - v%s | © %d %s. All rights reserved.", appVersion, currentYear, author));
-
-        // Set window size and center it
         this.setSize(900, 700);
         this.setLocationRelativeTo(null);
 
-        // Initialize drawing surface and WebSocket
+        // Initialize the drawing surface and WebSocket connection
         initializeDrawingSurface();
         initializeWebSocket();
     }
@@ -64,10 +62,10 @@ public class PaintForm extends JFrame {
         colorPreview.setOpaque(true);
         colorPreview.setBackground(newColor);
 
-        JPanel toolPanel = new JPanel();
-        toolPanel.setLayout(new GridLayout(8, 1, 5, 5)); // Use a GridLayout for the tool buttons
+        // Tool panel for the drawing tools
+        JPanel toolPanel = new JPanel(new GridLayout(8, 1, 5, 5));
 
-        // Create buttons with icons
+        // Tool buttons
         JButton btnPencil = createIconButton("Pencil", "resources/icons/pencil.png");
         JButton btnEraser = createIconButton("Eraser", "resources/icons/eraser.png");
         JButton btnRectangle = createIconButton("Rectangle", "resources/icons/rectangle.png");
@@ -87,17 +85,25 @@ public class PaintForm extends JFrame {
         toolPanel.add(btnFill);
         toolPanel.add(btnClear);
 
-        // Add action listeners for tools
-        btnPencil.addActionListener(e -> index = 1); // Pencil Tool
-        btnEraser.addActionListener(e -> index = 2); // Eraser Tool
-        btnRectangle.addActionListener(e -> index = 4); // Rectangle Tool
-        btnEllipse.addActionListener(e -> index = 3); // Ellipse Tool
-        btnLine.addActionListener(e -> index = 5); // Line Tool
-        btnColor.addActionListener(e -> chooseColor()); // Select color
-        btnFill.addActionListener(e -> index = 6); // Fill Tool
+        // Assign behavior to each button
+        btnPencil.addActionListener(e -> {
+            index = 1; // Pencil tool
+            g.setColor(newColor);
+            g.setStroke(pencilStroke);
+        });
+        btnEraser.addActionListener(e -> {
+            index = 2; // Eraser tool
+            g.setColor(Color.WHITE);
+            g.setStroke(eraserStroke);
+        });
+        btnRectangle.addActionListener(e -> index = 4); // Rectangle tool
+        btnEllipse.addActionListener(e -> index = 3); // Ellipse tool
+        btnLine.addActionListener(e -> index = 5); // Line tool
+        btnColor.addActionListener(e -> chooseColor()); // Color picker
+        btnFill.addActionListener(e -> index = 6); // Fill tool
         btnClear.addActionListener(e -> clearCanvas()); // Clear canvas
 
-        // Add Mouse Listeners for canvas
+        // Add mouse listeners for the canvas
         pic.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
@@ -107,8 +113,17 @@ public class PaintForm extends JFrame {
                 cX = e.getX();
                 cY = e.getY();
 
+                // Reset the graphics context for the selected tool
+                if (index == 1) { // Pencil tool
+                    g.setColor(newColor);
+                    g.setStroke(pencilStroke);
+                } else if (index == 2) { // Eraser tool
+                    g.setColor(Color.WHITE);
+                    g.setStroke(eraserStroke);
+                }
+
                 if (index == 6) { // Fill tool
-                    fillArea(px.x, px.y, newColor); // Perform flood fill
+                    drawingTools.fill(b_map, px.x, px.y, newColor);
                 }
             }
 
@@ -118,13 +133,19 @@ public class PaintForm extends JFrame {
                 sX = x - cX;
                 sY = y - cY;
 
-                // Draw shapes when the mouse is released
-                if (index == 3) { // Ellipse Tool
-                    g.drawOval(Math.min(cX, x), Math.min(cY, y), Math.abs(sX), Math.abs(sY));
-                } else if (index == 4) { // Rectangle Tool
-                    g.drawRect(Math.min(cX, x), Math.min(cY, y), Math.abs(sX), Math.abs(sY));
-                } else if (index == 5) { // Line Tool
-                    g.drawLine(cX, cY, x, y);
+                // Handle shape drawing tools
+                switch (index) {
+                    case 3: // Ellipse tool
+                        drawingTools.drawEllipse(pencilStroke, Math.min(cX, x), Math.min(cY, y),
+                                Math.abs(sX), Math.abs(sY), g);
+                        break;
+                    case 4: // Rectangle tool
+                        drawingTools.drawRectangle(pencilStroke, Math.min(cX, x), Math.min(cY, y),
+                                Math.abs(sX), Math.abs(sY), g);
+                        break;
+                    case 5: // Line tool
+                        drawingTools.drawLine(pencilStroke, cX, cY, x, y, g);
+                        break;
                 }
                 pic.repaint();
                 broadcastCanvasState();
@@ -139,24 +160,26 @@ public class PaintForm extends JFrame {
                 x = e.getX();
                 y = e.getY();
 
-                if (index == 1) { // Pencil Tool
-                    g.setStroke(pencilStroke);
-                    g.drawLine(px.x, px.y, x, y);
-                    px = e.getPoint();
-                } else if (index == 2) { // Eraser Tool
-                    g.setStroke(eraserStroke);
-                    g.setColor(Color.WHITE);
-                    g.drawLine(px.x, px.y, x, y);
-                    px = e.getPoint();
-                    g.setColor(newColor); // Reset to current color
-                    g.setStroke(pencilStroke); // Reset stroke size
+                // Handle freehand tools (pencil and eraser)
+                switch (index) {
+                    case 1: // Pencil
+                        drawingTools.pencil(e, g, pencilStroke, new Point[]{px, py});
+                        px = py;
+                        py = e.getPoint();
+                        break;
+                    case 2: // Eraser
+                        drawingTools.eraserTool(px, py, g, eraserStroke, e);
+                        px = py;
+                        py = e.getPoint();
+                        break;
                 }
+
                 pic.repaint();
                 broadcastCanvasState();
             }
         });
 
-        // File Menu (including New Window)
+        // File menu configuration
         JMenuBar menuBar = new JMenuBar();
         JMenu fileMenu = new JMenu("File");
         JMenuItem openItem = new JMenuItem("Open");
@@ -172,7 +195,7 @@ public class PaintForm extends JFrame {
         fileMenu.add(newWindowItem);
         menuBar.add(fileMenu);
 
-        // Add components to the JFrame
+        // Add components to the frame
         this.setJMenuBar(menuBar);
         this.setLayout(new BorderLayout());
         this.add(toolPanel, BorderLayout.WEST);
@@ -180,7 +203,6 @@ public class PaintForm extends JFrame {
         this.add(pic, BorderLayout.CENTER);
     }
 
-    // Method to create a button with an icon
     private JButton createIconButton(String tooltip, String iconPath) {
         JButton button = new JButton();
         button.setToolTipText(tooltip);
@@ -189,46 +211,18 @@ public class PaintForm extends JFrame {
             Image scaledImage = icon.getImage().getScaledInstance(24, 24, Image.SCALE_SMOOTH);
             button.setIcon(new ImageIcon(scaledImage));
         } catch (Exception e) {
-            button.setText(tooltip); // Fallback if the icon file cannot be loaded
+            button.setText(tooltip); // Fallback text
         }
         return button;
     }
 
-    // Initialize the drawing surface
     private void initializeDrawingSurface() {
         b_map = new BufferedImage(900, 700, BufferedImage.TYPE_INT_ARGB);
         g = b_map.createGraphics();
         g.setColor(Color.WHITE);
-        g.fillRect(0, 0, b_map.getWidth(), b_map.getHeight()); // Fill white background
+        g.fillRect(0, 0, b_map.getWidth(), b_map.getHeight()); // White background
         g.setColor(newColor);
         pic.setIcon(new ImageIcon(b_map));
-    }
-
-    private void fillArea(int x, int y, Color replacementColor) {
-        int targetColor = b_map.getRGB(x, y);
-        if (targetColor == replacementColor.getRGB()) return;
-
-        Queue<Point> pointsQueue = new LinkedList<>();
-        pointsQueue.add(new Point(x, y));
-
-        while (!pointsQueue.isEmpty()) {
-            Point point = pointsQueue.poll();
-            int currentX = point.x;
-            int currentY = point.y;
-
-            if (currentX < 0 || currentY < 0 || currentX >= b_map.getWidth() || currentY >= b_map.getHeight())
-                continue;
-            if (b_map.getRGB(currentX, currentY) != targetColor) continue;
-
-            b_map.setRGB(currentX, currentY, replacementColor.getRGB());
-            pointsQueue.add(new Point(currentX + 1, currentY));
-            pointsQueue.add(new Point(currentX - 1, currentY));
-            pointsQueue.add(new Point(currentX, currentY + 1));
-            pointsQueue.add(new Point(currentX, currentY - 1));
-        }
-
-        pic.repaint();
-        broadcastCanvasState();
     }
 
     private void chooseColor() {
@@ -240,36 +234,30 @@ public class PaintForm extends JFrame {
     }
 
     private void clearCanvas() {
-        g.setColor(Color.WHITE);
-        g.fillRect(0, 0, b_map.getWidth(), b_map.getHeight());
-        g.setColor(newColor);
-        pic.repaint();
+        drawingTools.clearTool(g, pic); // Delegated to DrawingTools
         broadcastCanvasState();
     }
 
     private void saveCanvas() {
-        JFileChooser fileChooser = new JFileChooser();
-        if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
-            try {
-                ImageIO.write(b_map, "png", fileChooser.getSelectedFile());
-            } catch (IOException ex) {
-                JOptionPane.showMessageDialog(this, "Error saving file: " + ex.getMessage(), "Save Error", JOptionPane.ERROR_MESSAGE);
-            }
+        try {
+            fileHandler.saveImage(this, b_map); // Save the current canvas to a file
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(this, "Error saving file: " + ex.getMessage(), "Save Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 
     private void openCanvas() {
-        JFileChooser fileChooser = new JFileChooser();
-        if (fileChooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-            try {
-                b_map = ImageIO.read(fileChooser.getSelectedFile());
-                g = b_map.createGraphics();
+        try {
+            BufferedImage newImage = fileHandler.openImage(this); // Open an image from the file system
+            if (newImage != null) {
+                b_map = newImage; // Replace the current canvas with the new image
+                g = b_map.createGraphics(); // Redefine the Graphics2D instance
                 pic.setIcon(new ImageIcon(b_map));
                 pic.repaint();
                 broadcastCanvasState();
-            } catch (IOException ex) {
-                JOptionPane.showMessageDialog(this, "Error opening file: " + ex.getMessage(), "Open Error", JOptionPane.ERROR_MESSAGE);
             }
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(this, "Error opening file: " + ex.getMessage(), "Open Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 
