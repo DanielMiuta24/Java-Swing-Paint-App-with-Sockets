@@ -6,6 +6,8 @@ import java.io.*;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Base64;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import javax.imageio.ImageIO;
 import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ServerHandshake;
@@ -39,6 +41,10 @@ public class PaintForm extends JFrame {
     private JLabel userLabel;
     private  boolean authenticated = false;
     private String username;
+    private final Map<String, Point> otherUserCursors = new ConcurrentHashMap<>();
+    private String lastSubmittedUsername;
+
+
 
 
     public PaintForm() {
@@ -57,7 +63,27 @@ public class PaintForm extends JFrame {
     }
 
     private void initComponents() {
-        pic = new JLabel();
+        pic = new JLabel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                g.drawImage(b_map, 0, 0, null);
+
+                // Draw other users' cursors with names
+                Graphics2D g2 = (Graphics2D) g;
+                g2.setFont(new Font("Arial", Font.BOLD, 12));
+                g2.setColor(Color.BLUE);
+
+                for (Map.Entry<String, Point> entry : otherUserCursors.entrySet()) {
+                    String name = entry.getKey();
+                    Point p = entry.getValue();
+
+                    g2.drawString(name, p.x + 12, p.y - 12);
+                    g2.fillOval(p.x, p.y, 6, 6);
+                }
+            }
+        };
+
         colorPreview = new JLabel();
         colorPreview.setOpaque(true);
         colorPreview.setBackground(newColor);
@@ -183,6 +209,11 @@ public class PaintForm extends JFrame {
 
                 pic.repaint();
                 broadcastCanvasState();
+                sendCursorPosition(x, y);
+            }
+            @Override
+            public void mouseMoved(MouseEvent e) {
+                sendCursorPosition(e.getX(), e.getY());
             }
         });
 
@@ -284,13 +315,26 @@ public class PaintForm extends JFrame {
                 public void onMessage(String message) {
                     if (message.equals("login_success") || message.equals("register_success")) {
                         authenticated = true;
+
+
+                        if (username == null || username.isEmpty()) {
+                            username = lastSubmittedUsername;
+                        }
+
                         SwingUtilities.invokeLater(() -> {
-                            initializeDrawingSurface();
                             userLabel.setText("Logged in as: " + username);
+                            initializeDrawingSurface();
                         });
-                    } else if (message.equals("login_failed")) {
+                    }
+
+                    else if (message.equals("login_failed") || message.equals("register_failed")) {
                         authenticated = false;
-                    } else if (message.equals("unauthorized")) {
+                        SwingUtilities.invokeLater(() ->
+                                JOptionPane.showMessageDialog(null, "Authentication failed. Try again.")
+                        );
+                    }
+
+                    else if (message.equals("unauthorized")) {
                         JOptionPane.showMessageDialog(null, "You are not logged in.");
                     } else if (message.startsWith("update_img:")) {
                         String encoded = message.substring("update_img:".length());
@@ -321,6 +365,18 @@ public class PaintForm extends JFrame {
 
                         } catch (IOException e) {
                             e.printStackTrace();
+                        }
+                    }
+                    else if (message.startsWith("cursor:")) {
+                        String[] parts = message.split(":");
+                        if (parts.length == 4) {
+                            String user = parts[1];
+                            int x = Integer.parseInt(parts[2]);
+                            int y = Integer.parseInt(parts[3]);
+                            if (!user.equals(username)) {
+                                otherUserCursors.put(user, new Point(x, y));
+                                pic.repaint();
+                            }
                         }
                     }
                 }
@@ -355,6 +411,12 @@ public class PaintForm extends JFrame {
             System.err.println("Error broadcasting canvas state: " + ex.getMessage());
         }
     }
+    private void sendCursorPosition(int x, int y) {
+        if (webSocket != null && webSocket.isOpen() && username != null) {
+            webSocket.send("cursor:" + username + ":" + x + ":" + y);
+        }
+    }
+
     private void showAuthDialog() {
         JTextField usernameField = new JTextField();
         JPasswordField passwordField = new JPasswordField();
@@ -389,6 +451,9 @@ public class PaintForm extends JFrame {
             }
 
             String command = (option == 0) ? "login:" : "register:";
+            lastSubmittedUsername = user;
+            this.username = user;
+
             final String messageToSend = command + user + ":" + pass;
 
 
@@ -398,23 +463,40 @@ public class PaintForm extends JFrame {
 
 
             webSocket.send(messageToSend);
-
-
-            try {
-                Thread.sleep(500);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
+            int waitTime = 0;
+            while (!authenticated && waitTime < 2000) {
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                waitTime += 50;
             }
 
-            if (!authenticated) {
-                JOptionPane.showMessageDialog(this, "Authentication failed. Try again.");
-            } else {
-                username = user;
-                userLabel.setText("Logged in as: " + user);
 
-            }
+
         }
     }
+    @Override
+    public void paint(Graphics g) {
+        super.paint(g);
+
+        Graphics2D g2 = (Graphics2D) pic.getGraphics();
+        g2.setFont(new Font("Arial", Font.BOLD, 12));
+        g2.setColor(Color.BLUE);
+
+        for (Map.Entry<String, Point> entry : otherUserCursors.entrySet()) {
+            String name = entry.getKey();
+            Point p = entry.getValue();
+
+
+            g2.drawString(name, p.x + 12, p.y - 12);
+
+
+            g2.fillOval(p.x, p.y, 6, 6);
+        }
+    }
+
 
 
     public static void main(String[] args) {

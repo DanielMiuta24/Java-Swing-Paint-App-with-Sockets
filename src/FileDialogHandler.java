@@ -6,13 +6,6 @@ import java.io.IOException;
 
 public class FileDialogHandler {
 
-    /**
-     * Opens an image from the file system.
-     *
-     * @param parent The parent JFrame that invokes the file dialog.
-     * @return A BufferedImage read from the selected file.
-     * @throws IOException If there is an issue reading the image.
-     */
     public BufferedImage openImage(JFrame parent) throws IOException {
         JFileChooser fileChooser = new JFileChooser();
         if (fileChooser.showOpenDialog(parent) == JFileChooser.APPROVE_OPTION) {
@@ -22,13 +15,7 @@ public class FileDialogHandler {
         return null; // No file was selected
     }
 
-    /**
-     * Saves an image to the file system.
-     *
-     * @param parent The parent JFrame that invokes the file dialog.
-     * @param image  The BufferedImage to save.
-     * @throws IOException If there is an issue writing the image to file.
-     */
+
     public void saveImage(JFrame parent, BufferedImage image) throws IOException {
         JFileChooser fileChooser = new JFileChooser();
         if (fileChooser.showSaveDialog(parent) == JFileChooser.APPROVE_OPTION) {

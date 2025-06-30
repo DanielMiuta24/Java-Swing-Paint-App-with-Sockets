@@ -62,6 +62,8 @@ public class WebSocketServerHandler extends WebSocketServer {
                     String username = parts[1];
                     String password = parts[2];
                     boolean success = userDB.registerUser(username, password);
+                    authenticatedUsers.put(conn, username);
+
                     conn.send(success ? "register_success" : "register_failed");
                 }
                 return;
@@ -75,6 +77,7 @@ public class WebSocketServerHandler extends WebSocketServer {
                     boolean success = userDB.loginUser(username, password);
                     if (success) {
                         authenticatedUsers.put(conn, username);
+
                         conn.send("login_success");
                         if (latestCanvasState != null) {
                             conn.send("update_img:" + latestCanvasState);
