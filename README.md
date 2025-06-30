@@ -131,21 +131,9 @@ This project is a **real-time collaborative drawing application** built using **
 - GUI updates on the Swing Event Dispatch Thread (EDT) using `SwingUtilities.invokeLater`.
 - WebSocket server runs on a separate thread for each connection.
 
-### ✅ 11. **Sorting Algorithm**
-- Implemented in the paired “Grade System” project.
-- Used to sort students based on average grades using a comparator:
-  ```java
-  students.sort(Comparator.comparingDouble(Student::getAverageGrade));
-  ```
 
-### ✅ 12. **ArrayList**
-- Used in the paint app and class projects for managing collections of elements like students or drawing history.
-- Example from Grade System:
-  ```java
-  List<Student> students = new ArrayList<>();
-  ```
 
-### ✅ 13. **Inner Classes**
+### ✅ 11. **Inner Classes**
 - Anonymous inner classes are used for handling button clicks and mouse events.
 - Keeps logic close to the component using it.
 - Example:
