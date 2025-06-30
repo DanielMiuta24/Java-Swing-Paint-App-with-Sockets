@@ -3,7 +3,9 @@ import org.java_websocket.WebSocket;
 import org.java_websocket.handshake.ClientHandshake;
 
 import java.net.InetSocketAddress;
+import java.sql.SQLException;
 import java.util.Collections;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.ConsoleHandler;
@@ -13,10 +15,13 @@ import java.util.logging.Logger;
 public class WebSocketServerHandler extends WebSocketServer {
     private static final Logger LOGGER = Logger.getLogger(WebSocketServerHandler.class.getName());
     private final Set<WebSocket> connections = Collections.newSetFromMap(new ConcurrentHashMap<>());
-    private String latestCanvasState = null; // Stores the last known canvas state
+    private String latestCanvasState = null;
+    private final Map<WebSocket, String> authenticatedUsers = new ConcurrentHashMap<>();
+    private final UserDatabaseManager userDB;
 
-    public WebSocketServerHandler(int port) {
+    public WebSocketServerHandler(int port) throws SQLException {
         super(new InetSocketAddress(port));
+        this.userDB = new UserDatabaseManager();
         setupLogging();
     }
 
@@ -33,7 +38,7 @@ public class WebSocketServerHandler extends WebSocketServer {
         connections.add(conn);
         LOGGER.info("New client connected: " + conn.getRemoteSocketAddress());
 
-        // Send the latest canvas state to the newly connected client
+
         if (latestCanvasState != null) {
             conn.send("update_img:" + latestCanvasState);
             LOGGER.info("Sent latest canvas state to new client.");
@@ -50,16 +55,56 @@ public class WebSocketServerHandler extends WebSocketServer {
     public void onMessage(WebSocket conn, String message) {
         LOGGER.info("Received message: " + message);
 
-        // If the message is a canvas update, store the latest state
-        if (message.startsWith("update_img:")) {
-            latestCanvasState = message.substring("update_img:".length());
-        }
-
-        // Broadcast to all clients (except the sender)
-        for (WebSocket client : connections) {
-            if (client != conn) {
-                client.send(message);
+        try {
+            if (message.startsWith("register:")) {
+                String[] parts = message.split(":");
+                if (parts.length == 3) {
+                    String username = parts[1];
+                    String password = parts[2];
+                    boolean success = userDB.registerUser(username, password);
+                    conn.send(success ? "register_success" : "register_failed");
+                }
+                return;
             }
+
+            if (message.startsWith("login:")) {
+                String[] parts = message.split(":");
+                if (parts.length == 3) {
+                    String username = parts[1];
+                    String password = parts[2];
+                    boolean success = userDB.loginUser(username, password);
+                    if (success) {
+                        authenticatedUsers.put(conn, username);
+                        conn.send("login_success");
+                        if (latestCanvasState != null) {
+                            conn.send("update_img:" + latestCanvasState);
+                        }
+                    } else {
+                        conn.send("login_failed");
+                    }
+                }
+                return;
+            }
+
+
+            if (!authenticatedUsers.containsKey(conn)) {
+                conn.send("unauthorized");
+                return;
+            }
+
+
+            if (message.startsWith("update_img:")) {
+                latestCanvasState = message.substring("update_img:".length());
+            }
+
+            for (WebSocket client : connections) {
+                if (client != conn) {
+                    client.send(message);
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.severe("Error handling message: " + e.getMessage());
+            conn.send("server_error");
         }
     }
 
@@ -73,7 +118,7 @@ public class WebSocketServerHandler extends WebSocketServer {
         LOGGER.info("WebSocket server started on " + getAddress());
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws SQLException {
         int port = 8081; // Change the port if necessary
         WebSocketServerHandler server = new WebSocketServerHandler(port);
         server.start();

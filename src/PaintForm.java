@@ -36,19 +36,24 @@ public class PaintForm extends JFrame {
 
     private JLabel pic;         // Drawing canvas
     private JLabel colorPreview; // Color preview box
+    private JLabel userLabel;
+    private  boolean authenticated = false;
+    private String username;
+
 
     public PaintForm() {
-        // Initialize GUI components
+
         initComponents();
 
-        // Set JFrame properties
+
         setTitle("Paint Application");
         setSize(900, 700);
         setLocationRelativeTo(null);
 
-        // Initialize drawing area and WebSocket
-        initializeDrawingSurface();
         initializeWebSocket();
+        showAuthDialog();
+
+
     }
 
     private void initComponents() {
@@ -56,6 +61,10 @@ public class PaintForm extends JFrame {
         colorPreview = new JLabel();
         colorPreview.setOpaque(true);
         colorPreview.setBackground(newColor);
+        userLabel = new JLabel("Not logged in");
+        userLabel.setHorizontalAlignment(SwingConstants.RIGHT);
+        userLabel.setFont(new Font("Arial", Font.BOLD, 14));
+
 
         // Tool panel for tools and actions
         JPanel toolPanel = new JPanel(new GridLayout(8, 1, 5, 5));
@@ -196,7 +205,10 @@ public class PaintForm extends JFrame {
         this.setJMenuBar(menuBar);
         this.setLayout(new BorderLayout());
         this.add(toolPanel, BorderLayout.WEST);
-        this.add(colorPreview, BorderLayout.NORTH);
+        JPanel topPanel = new JPanel(new BorderLayout());
+        topPanel.add(colorPreview, BorderLayout.WEST);
+        topPanel.add(userLabel, BorderLayout.EAST);
+        this.add(topPanel, BorderLayout.NORTH);
         this.add(pic, BorderLayout.CENTER);
     }
 
@@ -270,15 +282,45 @@ public class PaintForm extends JFrame {
 
                 @Override
                 public void onMessage(String message) {
-                    if (message.startsWith("update_img:")) {
-                        String base64Image = message.substring("update_img:".length());
+                    if (message.equals("login_success") || message.equals("register_success")) {
+                        authenticated = true;
+                        SwingUtilities.invokeLater(() -> {
+                            initializeDrawingSurface();
+                            userLabel.setText("Logged in as: " + username);
+                        });
+                    } else if (message.equals("login_failed")) {
+                        authenticated = false;
+                    } else if (message.equals("unauthorized")) {
+                        JOptionPane.showMessageDialog(null, "You are not logged in.");
+                    } else if (message.startsWith("update_img:")) {
+                        String encoded = message.substring("update_img:".length());
                         try {
-                            byte[] bytes = Base64.getDecoder().decode(base64Image);
-                            BufferedImage img = ImageIO.read(new ByteArrayInputStream(bytes));
-                            g.drawImage(img, 0, 0, null);
-                            pic.repaint();
-                        } catch (IOException ex) {
-                            ex.printStackTrace();
+                            byte[] imageBytes = Base64.getDecoder().decode(encoded);
+                            InputStream in = new ByteArrayInputStream(imageBytes);
+                            BufferedImage incoming = ImageIO.read(in);
+
+                            SwingUtilities.invokeLater(() -> {
+
+                                if (b_map == null) {
+                                    b_map = new BufferedImage(900, 700, BufferedImage.TYPE_INT_ARGB);
+                                }
+
+
+                                Graphics2D g2d = b_map.createGraphics();
+                                g2d.drawImage(incoming, 0, 0, null);
+                                g2d.dispose();
+
+
+                                g = b_map.createGraphics();
+                                g.setColor(newColor);
+                                g.setStroke(pencilStroke);
+
+                                pic.setIcon(new ImageIcon(b_map));
+                                repaint();
+                            });
+
+                        } catch (IOException e) {
+                            e.printStackTrace();
                         }
                     }
                 }
@@ -293,9 +335,11 @@ public class PaintForm extends JFrame {
                     System.err.println("WebSocket error: " + ex.getMessage());
                 }
             };
-            webSocket.connect();
+            webSocket.connectBlocking();
         } catch (URISyntaxException e) {
             e.printStackTrace();
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
         }
     }
 
@@ -311,6 +355,67 @@ public class PaintForm extends JFrame {
             System.err.println("Error broadcasting canvas state: " + ex.getMessage());
         }
     }
+    private void showAuthDialog() {
+        JTextField usernameField = new JTextField();
+        JPasswordField passwordField = new JPasswordField();
+
+        Object[] message = {
+                "Username:", usernameField,
+                "Password:", passwordField
+        };
+
+        while (!authenticated) {
+            int option = JOptionPane.showOptionDialog(
+                    this,
+                    message,
+                    "Login or Register",
+                    JOptionPane.DEFAULT_OPTION,
+                    JOptionPane.PLAIN_MESSAGE,
+                    null,
+                    new String[]{"Login", "Register", "Cancel"},
+                    "Login"
+            );
+
+            if (option == 2 || option == JOptionPane.CLOSED_OPTION) {
+                System.exit(0); // Exit app if cancel
+            }
+
+            String user = usernameField.getText().trim();
+            String pass = new String(passwordField.getPassword()).trim();
+
+            if (user.isEmpty() || pass.isEmpty()) {
+                JOptionPane.showMessageDialog(this, "Please fill both fields.");
+                continue;
+            }
+
+            String command = (option == 0) ? "login:" : "register:";
+            final String messageToSend = command + user + ":" + pass;
+
+
+            if (webSocket == null) {
+                initializeWebSocket();
+            }
+
+
+            webSocket.send(messageToSend);
+
+
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+
+            if (!authenticated) {
+                JOptionPane.showMessageDialog(this, "Authentication failed. Try again.");
+            } else {
+                username = user;
+                userLabel.setText("Logged in as: " + user);
+
+            }
+        }
+    }
+
 
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
