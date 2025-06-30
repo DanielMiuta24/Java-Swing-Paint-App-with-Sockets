@@ -32,7 +32,6 @@ This project is a **real-time collaborative drawing application** built using **
 | Data Structures  | `ConcurrentHashMap`, `ArrayList`       |
 
 ---
-
 ## 📍 Concepts and Where They Were Used
 
 ### ✅ 1. **Polymorphism**
@@ -40,51 +39,124 @@ This project is a **real-time collaborative drawing application** built using **
 - Each method accepts a common interface (stroke, coordinates, Graphics2D) and executes shape-specific logic.
 - Example:
   ```java
-  public void drawRectangle(Stroke stroke, int x, int y, int width, int height, Graphics2D g) { ... }
+  public void drawRectangle(Stroke stroke, int x, int y, int width, int height, Graphics2D g) {
+      g.setStroke(stroke);
+      g.drawRect(x, y, width, height);
+  }
   ```
 
 ### ✅ 2. **Exception Handling**
-- Extensively used to ensure safe execution:
-  - File open/save (`IOException`)
-  - Image processing (`Base64 decoding`, `ImageIO.read`)
-  - WebSocket communication (`URISyntaxException`, `InterruptedException`)
+- Extensively used across the project to prevent crashes and handle edge cases safely:
+  - File operations: reading/writing PNGs
+  - Networking: handling broken WebSocket connections
+  - Base64 encoding/decoding errors
 - Example:
   ```java
   try {
       ImageIO.write(b_map, "png", baos);
   } catch (IOException ex) {
-      System.err.println("Error broadcasting canvas state: " + ex.getMessage());
+      System.err.println("Error saving canvas: " + ex.getMessage());
   }
   ```
 
 ### ✅ 3. **HashMap / ConcurrentHashMap**
-- Used to store cursor positions of other users:
+- `ConcurrentHashMap` is used to store and manage other users' cursors safely in a multithreaded environment.
+- Ensures thread-safe updates when users draw or move their cursors.
+- Example:
   ```java
   private final Map<String, Point> otherUserCursors = new ConcurrentHashMap<>();
   ```
-- This ensures **thread-safe updates** when multiple users are moving their cursors. The UI updates based on the latest cursor data received via WebSocket.
-- Displayed in `paintComponent`:
-  ```java
-  g2.drawString(name, p.x + 12, p.y - 12);
-  g2.fillOval(p.x, p.y, 6, 6);
-  ```
 
 ### ✅ 4. **File Handling**
-- Used to open and save drawings using `JFileChooser` and `ImageIO`.
-- Open: Reads image from file and converts to `BufferedImage`.
-- Save: Exports `BufferedImage` as PNG.
+- Implemented using `JFileChooser`, `FileDialog`, and `ImageIO`.
+- Supports saving the canvas to an image file and loading images into the canvas.
+- Example:
+  ```java
+  JFileChooser fileChooser = new JFileChooser();
+  int result = fileChooser.showSaveDialog(frame);
+  if (result == JFileChooser.APPROVE_OPTION) {
+      File file = fileChooser.getSelectedFile();
+      ImageIO.write(canvasImage, "png", file);
+  }
+  ```
 
 ### ✅ 5. **Graphics2D**
-- Central to all drawing operations:
-  - Tools like pencil, eraser, and shapes are implemented using `Graphics2D` methods: `drawLine`, `drawOval`, `fillRect`, etc.
-- Custom stroke width and anti-aliasing for smooth visuals.
+- Central to all rendering tasks in the application.
+- Supports shape drawing, custom stroke thickness, fill colors, and smooth anti-aliasing.
+- Used to draw:
+  - Freehand lines (pencil)
+  - Shapes (rectangles, ellipses)
+  - Eraser functionality (clearing small areas)
 
 ### ✅ 6. **WebSocket Communication**
-- Real-time data exchange for:
-  - Authentication (`login:username:password`)
-  - Canvas image sync (`update_img:<base64>`)
-  - Cursor sync (`cursor:username:x:y`)
-- Implemented using `org.java_websocket.client.WebSocketClient`.
-- Supports multiple users connected to the same canvas.
+- Enables real-time collaboration between clients and the server.
+- Used to:
+  - Broadcast canvas image updates
+  - Sync cursor positions between users
+  - Manage login and session authentication
+- Example:
+  ```java
+  webSocket.send("cursor:" + username + ":" + x + ":" + y);
+  ```
+
+### ✅ 7. **Encapsulation**
+- Project follows encapsulation by hiding internal fields and exposing behavior via methods:
+  - `DrawingTools` encapsulates rendering logic
+  - `FileDialogHandler` encapsulates file loading/saving
+- Fields marked `private`, access provided via getters/setters or public methods.
+
+### ✅ 8. **Inheritance**
+- `PaintForm` extends `JFrame` for GUI.
+- `WebSocketServerHandler` extends `WebSocketServer` to create custom server logic.
+- Example:
+  ```java
+  public class PaintForm extends JFrame {
+      // UI logic here
+  }
+  ```
+
+### ✅ 9. **Serialization**
+- Used for transmitting canvas image data over WebSocket.
+- Converts `BufferedImage` to PNG, then to Base64 string for transport.
+- Example:
+  ```java
+  ByteArrayOutputStream baos = new ByteArrayOutputStream();
+  ImageIO.write(b_map, "png", baos);
+  String encoded = Base64.getEncoder().encodeToString(baos.toByteArray());
+  ```
+
+### ✅ 10. **Multithreading**
+- Application handles multiple clients concurrently.
+- `ConcurrentHashMap` ensures thread-safe cursor handling.
+- GUI updates on the Swing Event Dispatch Thread (EDT) using `SwingUtilities.invokeLater`.
+- WebSocket server runs on a separate thread for each connection.
+
+### ✅ 11. **Sorting Algorithm**
+- Implemented in the paired “Grade System” project.
+- Used to sort students based on average grades using a comparator:
+  ```java
+  students.sort(Comparator.comparingDouble(Student::getAverageGrade));
+  ```
+
+### ✅ 12. **ArrayList**
+- Used in the paint app and class projects for managing collections of elements like students or drawing history.
+- Example from Grade System:
+  ```java
+  List<Student> students = new ArrayList<>();
+  ```
+
+### ✅ 13. **Inner Classes**
+- Anonymous inner classes are used for handling button clicks and mouse events.
+- Keeps logic close to the component using it.
+- Example:
+  ```java
+  clearButton.addActionListener(new ActionListener() {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+          clearCanvas();
+      }
+  });
+  ```
+
 
 ---
